@@ -9,7 +9,7 @@
 - **Admin** (per defecte `1234`): pot veure, modificar, afegir i esborrar vots.
 - **Lectura** (per defecte `0000`): només pot veure i copiar el resum. Aquest és el que dones a l'altra persona.
 
-**Canvia'ls abans de compartir l'enllaç:** a Netlify, ves a *Site configuration → Environment variables* i afegeix `PIN_ADMIN` i `PIN_LECTURA`. Després fes *Deploys → Trigger deploy*.
+**Canvia-los abans de compartir l'enllaç:** entra a `resultat.html` amb el PIN `1234` i, a baix de tot, obre **Canvia els PINs**.
 
 ## Com penjar-ho (aquesta app necessita "funcions": arrossegar la carpeta NO serveix)
 

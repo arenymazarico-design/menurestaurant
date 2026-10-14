@@ -29,6 +29,16 @@
       <button class="btn ghost small" id="refresh">Actualitza</button>
     </div>
     <p class="hint" id="rolehint"></p>
+    <div id="share" hidden class="done-card" style="background:var(--surface);border-color:var(--line)">
+      <h2 style="font-size:1.2rem;color:var(--fg)">Comparteix</h2>
+      <p class="hint"><b>Enllaç per al grup</b> (per votar):</p>
+      <div class="preview" id="sh-grup"></div>
+      <div class="btns"><a class="btn" id="sh-grup-wa" target="_blank" rel="noopener" href="#">Envia al grup</a><button class="btn ghost" type="button" id="sh-grup-cp">Copia</button></div>
+      <p class="hint" style="margin-top:6px"><b>Accés de lectura</b> (per veure els resultats):</p>
+      <div class="preview" id="sh-lect"></div>
+      <div class="btns"><a class="btn" id="sh-lect-wa" target="_blank" rel="noopener" href="#">Envia per WhatsApp</a><button class="btn ghost" type="button" id="sh-lect-cp">Copia</button></div>
+      <p class="toast" id="sh-toast" role="status"></p>
+    </div>
     <div class="btns" id="addwrap" hidden><button class="btn ghost" id="add">+ Afegeix una persona</button></div>
     <form id="ed" hidden class="done-card" style="background:var(--surface);border-color:var(--line)">
       <h2 id="edtitle" style="font-size:1.2rem;color:var(--fg)">Modifica</h2>
@@ -48,6 +58,16 @@
       <button class="btn ghost" id="copy">Copia el resum</button>
     </div>
     <p class="toast" id="toast" role="status"></p>
+
+    <details class="grp" id="pinsbox" hidden>
+      <summary>Canvia els PINs</summary>
+      <form id="pinsform" style="display:flex;flex-direction:column;gap:10px;padding:0 14px 14px">
+        <label class="f" for="np-admin">Nou PIN d'administrador (per a tu)<input type="text" id="np-admin" inputmode="numeric" minlength="4" maxlength="30"></label>
+        <label class="f" for="np-lect">Nou PIN de lectura (per a l'altra persona)<input type="text" id="np-lect" inputmode="numeric" minlength="4" maxlength="30"></label>
+        <p class="err" id="perr"></p>
+        <button class="btn" type="submit">Guarda els PINs</button>
+      </form>
+    </details>
   </section>
 </div>
 
@@ -121,7 +141,8 @@ async function load(){
   if(r.status===401){ $("res").hidden=true; $("login").hidden=false; $("lerr").textContent="PIN incorrecte."; clearInterval(timer); return false; }
   if(!r.ok) throw new Error();
   const j=await r.json(); ROLE=j.role; VOTS=j.vots;
-  $("addwrap").hidden=ROLE!=="admin";
+  $("addwrap").hidden=ROLE!=="admin"; $("pinsbox").hidden=ROLE!=="admin"; $("share").hidden=ROLE!=="admin";
+  if(ROLE==="admin") fillShare(j.pinLectura);
   $("rolehint").textContent=ROLE==="admin"?"Entrada com a administrador: pots modificar, afegir i esborrar.":"Accés de només lectura.";
   render(j.vots); return true;
 }
@@ -150,6 +171,34 @@ $("copy").onclick=async()=>{
   catch(e){ const r=document.createRange(); r.selectNodeContents($("sum")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); $("toast").textContent="Text seleccionat: copia'l."; }
   setTimeout(()=>$("toast").textContent="",3000);
 };
+function fillShare(pinL){
+  const base=location.origin+"/";
+  const g=`🍽️ Tria el teu menú per al dinar aquí:\n${base}\nPosa el teu nom, tria primer, segon i postres i prem Guarda.`;
+  const l=`📋 Resultats del menú:\n${base}resultat.html\nPIN: ${pinL}`;
+  $("sh-grup").textContent=g; $("sh-lect").textContent=l;
+  $("sh-grup-wa").href="https://wa.me/?text="+encodeURIComponent(g);
+  $("sh-lect-wa").href="https://wa.me/?text="+encodeURIComponent(l);
+}
+async function cp(el,toast){
+  try{ await navigator.clipboard.writeText(el.textContent); toast.textContent="Copiat."; }
+  catch(e){ const r=document.createRange(); r.selectNodeContents(el); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast.textContent="Text seleccionat: copia'l."; }
+  setTimeout(()=>toast.textContent="",3000);
+}
+$("sh-grup-cp").onclick=()=>cp($("sh-grup"),$("sh-toast"));
+$("sh-lect-cp").onclick=()=>cp($("sh-lect"),$("sh-toast"));
+$("pinsform").addEventListener("submit",async e=>{
+  e.preventDefault(); $("perr").textContent="";
+  const admin=$("np-admin").value.trim(), lectura=$("np-lect").value.trim();
+  if(admin.length<4||lectura.length<4){ $("perr").textContent="Cada PIN ha de tenir com a mínim 4 caràcters."; return; }
+  if(admin===lectura){ $("perr").textContent="Els dos PINs han de ser diferents."; return; }
+  try{
+    const r=await fetch("/api/vots?accio=pins&pin="+encodeURIComponent(PIN),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({admin,lectura})});
+    if(!r.ok) throw new Error();
+    PIN=admin; try{sessionStorage.setItem("pin",PIN)}catch(e){}
+    $("perr").style.color="var(--accent)"; $("perr").textContent="PINs canviats. Apunta'ls i dona el de lectura a l'altra persona.";
+    $("np-admin").value=""; $("np-lect").value=""; fillShare(lectura);
+  }catch(err){ $("perr").style.color=""; $("perr").textContent="No s'han pogut canviar. Torna-ho a provar."; }
+});
 if(PIN) enter();
 </script>
 </body>

@@ -1,10 +1,10 @@
 import { getStore } from "@netlify/blobs";
 
-// PINs. Canvia'ls aquí o defineix les variables PIN_ADMIN i PIN_LECTURA a Netlify.
+// PINs inicials: 1234 (admin) i 0000 (lectura). Es canvien des de resultat.html → "Canvia els PINs".
 // Admin: veure, modificar, afegir i esborrar.  Lectura: només veure i treure el resum.
-const PIN_ADMIN = process.env.PIN_ADMIN || "1234";
-const PIN_LECTURA = process.env.PIN_LECTURA || "0000";
-const role = (pin) => (pin && pin === PIN_ADMIN ? "admin" : pin && pin === PIN_LECTURA ? "lectura" : null);
+const DEFAULT = { admin: process.env.PIN_ADMIN || "1234", lectura: process.env.PIN_LECTURA || "0000" };
+let PINS = DEFAULT;
+const role = (pin) => (pin && pin === PINS.admin ? "admin" : pin && pin === PINS.lectura ? "lectura" : null);
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -17,7 +17,19 @@ const txt = (s, max) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max
 
 export default async (req) => {
   const store = getStore({ name: "vots-menu", consistency: "strong" });
+  const conf = getStore({ name: "config-menu", consistency: "strong" });
+  PINS = (await conf.get("pins", { type: "json" })) || DEFAULT;
   const url = new URL(req.url);
+
+  // Change PINs (admin only): POST /api/vots?accio=pins&pin=ADMIN  body {admin, lectura}
+  if (req.method === "POST" && url.searchParams.get("accio") === "pins") {
+    if (role(url.searchParams.get("pin")) !== "admin") return json({ error: "pin" }, 401);
+    const b = await req.json().catch(() => ({}));
+    const admin = txt(b.admin, 30), lectura = txt(b.lectura, 30);
+    if (admin.length < 4 || lectura.length < 4 || admin === lectura) return json({ error: "pins" }, 400);
+    await conf.setJSON("pins", { admin, lectura });
+    return json({ ok: true });
+  }
 
   if (req.method === "POST") {
     const b = await req.json().catch(() => null);
@@ -53,7 +65,7 @@ export default async (req) => {
     if (!r) return json({ error: "pin" }, 401);
     const { blobs } = await store.list();
     const vots = await Promise.all(blobs.map((b) => store.get(b.key, { type: "json" })));
-    return json({ role: r, vots: vots.filter(Boolean) });
+    return json({ role: r, vots: vots.filter(Boolean), ...(r === "admin" ? { pinLectura: PINS.lectura } : {}) });
   }
 
   if (req.method === "DELETE") {
