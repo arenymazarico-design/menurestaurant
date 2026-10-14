@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f5d3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tria el teu menú</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Què vols menjar?</h1>
+    <p class="lead">Posa el teu nom, tria un primer, un segon i unes postres, i prem Guarda.</p>
+  </header>
+
+  <section id="form" style="display:flex;flex-direction:column;gap:18px">
+    <label class="f" for="nom">El teu nom
+      <input type="text" id="nom" placeholder="Ex: Marta" autocomplete="given-name" maxlength="40">
+    </label>
+    <p class="hint" id="ja"></p>
+    <div id="courses" style="display:flex;flex-direction:column;gap:18px"></div>
+    <label class="f" for="nota">Al·lèrgies o comentaris (opcional)
+      <input type="text" id="nota" placeholder="Ex: sense gluten, carn al punt" maxlength="120">
+    </label>
+    <p class="err" id="error" role="alert"></p>
+    <div class="bar">
+      <div class="bar-in">
+        <div class="steps">
+          <span id="st-P" data-k="P">1r</span><span id="st-S" data-k="S">2n</span><span id="st-D" data-k="D">Postres</span>
+        </div>
+        <button class="btn" id="save">Guarda el meu menú</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="ok" hidden>
+    <div class="done-card">
+      <h2>Guardat ✓</h2>
+      <div class="preview" id="resum" style="background:var(--surface)"></div>
+      <p class="hint">Si canvies d'opinió, el pots modificar fins que es tanqui la comanda.</p>
+      <div class="btns"><button class="btn ghost" id="edit">Modifica el meu menú</button></div>
+    </div>
+  </section>
+</div>
+
+<script src="menu.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const sel={P:null,S:null,D:null};
+const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+function build(){
+  const host=$("courses");
+  for(const k of ["P","S","D"]){
+    const c=document.createElement("div"); c.className="course"; c.id="course-"+k;
+    c.innerHTML=`<h2>${MENU[k].title}<small>tria'n un</small></h2><div class="chosen" id="ch-${k}"></div>`;
+    let i=0;
+    MENU[k].groups.forEach(([g,items],gi)=>{
+      const d=document.createElement("details"); d.className="grp"; if(gi===0&&k==="P") d.open=true;
+      d.innerHTML=`<summary>${g} · ${items.length}</summary>`;
+      const o=document.createElement("div"); o.className="opts";
+      items.forEach(([n,a])=>{
+        i++;
+        const l=document.createElement("label"); l.className="opt";
+        l.innerHTML=`<input type="radio" name="c-${k}" id="r-${k}${i}" value="${i}"><span class="t">${n}${a?`<span class="al">${a}</span>`:""}</span>`;
+        o.appendChild(l);
+      });
+      d.appendChild(o); c.appendChild(d);
+    });
+    host.appendChild(c);
+  }
+  host.addEventListener("change",e=>{
+    if(!e.target.name?.startsWith("c-")) return;
+    const k=e.target.name.slice(2); sel[k]=+e.target.value; update();
+    setTimeout(()=>{
+      $("course-"+k).querySelectorAll("details").forEach(d=>d.open=false);
+      const nx={P:"S",S:"D",D:null}[k];
+      const t=nx?$("course-"+nx):$("nota");
+      if(nx){const f=t.querySelector("details"); if(f) f.open=true;}
+      t.scrollIntoView({behavior:"smooth",block:"start"});
+    },250);
+  });
+}
+function missing(){
+  const m=[]; if(!$("nom").value.trim()) m.push("nom");
+  if(!sel.P) m.push("1r"); if(!sel.S) m.push("2n"); if(!sel.D) m.push("postres"); return m;
+}
+function update(){
+  for(const k of ["P","S","D"]){
+    $("ch-"+k).textContent=sel[k]?"✓ "+IDX[k][sel[k]-1].n:"";
+    $("st-"+k).classList.toggle("ok",!!sel[k]);
+    $("course-"+k).classList.toggle("done",!!sel[k]);
+  }
+  const m=missing();
+  $("save").classList.toggle("off",m.length>0);
+  $("save").textContent=m.length?"Falta: "+m.join(", "):"Guarda el meu menú";
+}
+function setSel(v){
+  for(const k of ["P","S","D"]){ sel[k]=v[k]||null; const r=$("r-"+k+v[k]); if(r) r.checked=true; }
+  $("nota").value=v.nota||""; update();
+}
+function showOk(v){
+  $("resum").textContent=`${v.nom}\n1r: ${IDX.P[v.P-1].n}\n2n: ${IDX.S[v.S-1].n}\nPostres: ${IDX.D[v.D-1].n}${v.nota?"\nNota: "+v.nota:""}`;
+  $("form").hidden=true; $("ok").hidden=false; scrollTo({top:0});
+}
+let lookupT;
+async function lookup(){
+  const nom=$("nom").value.trim(); $("ja").textContent="";
+  if(nom.length<2) return;
+  try{
+    const r=await fetch("/api/vots?nom="+encodeURIComponent(nom)); const j=await r.json();
+    if(j.vot){ setSel(j.vot); $("ja").textContent="Ja tens un menú guardat amb aquest nom. Si guardes, el substituiràs."; }
+  }catch(e){}
+}
+async function save(){
+  $("error").textContent="";
+  const m=missing();
+  if(m.length){
+    const t=m[0]==="nom"?$("nom"):$("course-"+{"1r":"P","2n":"S","postres":"D"}[m[0]]);
+    t.scrollIntoView({behavior:"smooth",block:"center"}); if(t===$("nom")) t.focus(); return;
+  }
+  const v={nom:$("nom").value.trim(),P:sel.P,S:sel.S,D:sel.D,nota:$("nota").value.trim(),
+    plats:{P:IDX.P[sel.P-1].n,S:IDX.S[sel.S-1].n,D:IDX.D[sel.D-1].n}};
+  $("save").textContent="Guardant…";
+  try{
+    const r=await fetch("/api/vots",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(v)});
+    if(!r.ok) throw new Error();
+    ls.set("menu-nom",v.nom); showOk(v);
+  }catch(e){ $("error").textContent="No s'ha pogut guardar. Revisa la connexió i torna-ho a provar."; update(); }
+}
+
+build();
+$("nom").value=ls.get("menu-nom")||"";
+$("nom").addEventListener("input",()=>{update();clearTimeout(lookupT);lookupT=setTimeout(lookup,600)});
+$("save").onclick=save;
+$("edit").onclick=()=>{$("ok").hidden=true;$("form").hidden=false;update()};
+document.querySelector(".steps").addEventListener("click",e=>{
+  const k=e.target.dataset.k; if(!k) return; const c=$("course-"+k);
+  const f=c.querySelector("details"); if(f) f.open=true; c.scrollIntoView({behavior:"smooth",block:"start"});
+});
+update(); if($("nom").value) lookup();
+</script>
+</body>
+</html>

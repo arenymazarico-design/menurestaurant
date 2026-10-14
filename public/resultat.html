@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Resultat del menú</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Figtree:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap" style="padding-bottom:calc(40px + env(safe-area-inset-bottom,0px))">
+  <header>
+    <h1>Resultat del menú</h1>
+    <p class="lead">Es refresca sol cada 15 segons.</p>
+  </header>
+
+  <form id="login" style="display:flex;flex-direction:column;gap:10px">
+    <label class="f" for="pin">PIN de l'organitzador
+      <input type="password" id="pin" inputmode="numeric" autocomplete="current-password">
+    </label>
+    <button class="btn" type="submit">Entra</button>
+    <p class="err" id="lerr" role="alert"></p>
+  </form>
+
+  <section id="res" hidden style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <p class="stat" id="total"></p>
+      <button class="btn ghost small" id="refresh">Actualitza</button>
+    </div>
+    <p class="hint" id="rolehint"></p>
+    <div class="btns" id="addwrap" hidden><button class="btn ghost" id="add">+ Afegeix una persona</button></div>
+    <form id="ed" hidden class="done-card" style="background:var(--surface);border-color:var(--line)">
+      <h2 id="edtitle" style="font-size:1.2rem;color:var(--fg)">Modifica</h2>
+      <label class="f" for="ed-nom">Nom<input type="text" id="ed-nom" maxlength="40"></label>
+      <label class="f" for="ed-P">Primer<select id="ed-P"></select></label>
+      <label class="f" for="ed-S">Segon<select id="ed-S"></select></label>
+      <label class="f" for="ed-D">Postres<select id="ed-D"></select></label>
+      <label class="f" for="ed-nota">Nota<input type="text" id="ed-nota" maxlength="120"></label>
+      <p class="err" id="ederr"></p>
+      <div class="btns"><button class="btn" type="submit">Guarda</button><button class="btn ghost" type="button" id="edcancel">Cancel·la</button></div>
+    </form>
+    <div id="tables" style="display:flex;flex-direction:column;gap:12px"></div>
+    <p class="hint">Missatge per al restaurant:</p>
+    <div class="preview" id="sum"></div>
+    <div class="btns">
+      <a class="btn" id="wa" target="_blank" rel="noopener" href="#">Envia per WhatsApp</a>
+      <button class="btn ghost" id="copy">Copia el resum</button>
+    </div>
+    <p class="toast" id="toast" role="status"></p>
+  </section>
+</div>
+
+<script src="menu.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let PIN=""; try{PIN=sessionStorage.getItem("pin")||""}catch(e){}
+let timer, armed=null, ROLE=null, VOTS=[], editing=null;
+// Fill the edit selects from the menu
+for(const k of ["P","S","D"]){
+  const s=$("ed-"+k); s.style.cssText="font:inherit;font-size:16px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);width:100%";
+  s.innerHTML=`<option value="">— Tria —</option>`+MENU[k].groups.map(([g,items])=>`<optgroup label="${esc(g)}">`+items.map(([n])=>{const i=IDX[k].findIndex(x=>x.n===n)+1;return `<option value="${i}">${esc(n)}</option>`}).join("")+`</optgroup>`).join("");
+}
+function openEd(v){
+  editing=v||null;
+  $("edtitle").textContent=v?"Modifica: "+v.nom:"Afegeix una persona";
+  $("ed-nom").value=v?v.nom:""; $("ed-nota").value=v?.nota||"";
+  for(const k of ["P","S","D"]) $("ed-"+k).value=v?v[k]:"";
+  $("ederr").textContent=""; $("ed").hidden=false; $("ed").scrollIntoView({behavior:"smooth",block:"start"});
+}
+$("edcancel").onclick=()=>{$("ed").hidden=true; editing=null};
+$("add").onclick=()=>openEd(null);
+$("ed").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const v={nom:$("ed-nom").value.trim(),P:+$("ed-P").value,S:+$("ed-S").value,D:+$("ed-D").value,nota:$("ed-nota").value.trim()};
+  if(!v.nom||!v.P||!v.S||!v.D){ $("ederr").textContent="Omple el nom i els tres plats."; return; }
+  v.plats={P:IDX.P[v.P-1].n,S:IDX.S[v.S-1].n,D:IDX.D[v.D-1].n};
+  const q=editing?`?pin=${encodeURIComponent(PIN)}&oldId=${encodeURIComponent(editing.id)}`:"";
+  try{
+    const r=await fetch("/api/vots"+q,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(v)});
+    if(!r.ok) throw new Error();
+    $("ed").hidden=true; editing=null; load().catch(()=>{});
+  }catch(err){ $("ederr").textContent="No s'ha pogut guardar. Torna-ho a provar."; }
+});
+
+const name=(v,k)=>(v.plats&&v.plats[k])||(IDX[k][v[k]-1]||{}).n||"(sense triar)";
+function counts(vots,k){const m=new Map(); vots.forEach(v=>{const n=name(v,k); m.set(n,(m.get(n)||0)+1)}); return [...m.entries()].sort((a,b)=>b[1]-a[1]);}
+
+function summary(vots){
+  const L=[`Hola! Os pasamos la comanda para ${vots.length} persona${vots.length===1?"":"s"}:`,""];
+  const H={P:"PRIMEROS",S:"SEGUNDOS",D:"POSTRES"};
+  for(const k of ["P","S","D"]){ L.push(`*${H[k]}*`); counts(vots,k).forEach(([n,c])=>L.push(`${c} × ${n}`)); L.push(""); }
+  const notes=vots.filter(v=>v.nota);
+  if(notes.length){ L.push("*OBSERVACIONES*"); notes.forEach(v=>L.push(`- ${v.nom}: ${v.nota}`)); L.push(""); }
+  L.push("*DETALLE POR PERSONA*");
+  vots.forEach(v=>L.push(`- ${v.nom}: ${name(v,"P")} / ${name(v,"S")} / ${name(v,"D")}`));
+  L.push("","¡Gracias!"); return L.join("\n");
+}
+
+function render(vots){
+  vots.sort((a,b)=>a.nom.localeCompare(b.nom,"ca"));
+  $("total").textContent=`${vots.length} persona${vots.length===1?"":"s"} han triat`;
+  const H={P:"Primers",S:"Segons",D:"Postres"};
+  let h="";
+  if(!vots.length) h=`<p class="hint">Encara no ha votat ningú. Comparteix l'enllaç de la pàgina principal al grup.</p>`;
+  else{
+    for(const k of ["P","S","D"])
+      h+=`<div class="tbl"><table><thead><tr><th colspan="2">${H[k]}</th></tr></thead><tbody>`+
+        counts(vots,k).map(([n,c])=>`<tr><td class="n">${c}</td><td>${esc(n)}</td></tr>`).join("")+`</tbody></table></div>`;
+    h+=`<div class="tbl"><table><thead><tr><th>Qui</th><th>Menú</th><th></th></tr></thead><tbody>`+
+      vots.map(v=>`<tr><td><b>${esc(v.nom)}</b></td><td>${esc(name(v,"P"))}<br>${esc(name(v,"S"))}<br>${esc(name(v,"D"))}${v.nota?`<br><span class="warn">${esc(v.nota)}</span>`:""}</td><td>${ROLE==="admin"?`<button class="x" style="color:var(--accent)" data-edit="${esc(v.id)}">Modifica</button><br><button class="x" data-id="${esc(v.id)}">${armed===v.id?"Segur?":"Esborra"}</button>`:""}</td></tr>`).join("")+`</tbody></table></div>`;
+  }
+  $("tables").innerHTML=h;
+  const s=summary(vots); $("sum").textContent=s;
+  $("wa").href="https://wa.me/?text="+encodeURIComponent(s);
+}
+
+async function load(){
+  const r=await fetch("/api/vots?pin="+encodeURIComponent(PIN));
+  if(r.status===401){ $("res").hidden=true; $("login").hidden=false; $("lerr").textContent="PIN incorrecte."; clearInterval(timer); return false; }
+  if(!r.ok) throw new Error();
+  const j=await r.json(); ROLE=j.role; VOTS=j.vots;
+  $("addwrap").hidden=ROLE!=="admin";
+  $("rolehint").textContent=ROLE==="admin"?"Entrada com a administrador: pots modificar, afegir i esborrar.":"Accés de només lectura.";
+  render(j.vots); return true;
+}
+async function enter(){
+  $("lerr").textContent="";
+  try{
+    if(await load()){
+      try{sessionStorage.setItem("pin",PIN)}catch(e){}
+      $("login").hidden=true; $("res").hidden=false;
+      clearInterval(timer); timer=setInterval(()=>load().catch(()=>{}),15000);
+    }
+  }catch(e){ $("lerr").textContent="No s'ha pogut connectar. Torna-ho a provar."; }
+}
+$("login").addEventListener("submit",e=>{e.preventDefault(); PIN=$("pin").value.trim(); enter();});
+$("refresh").onclick=()=>load().catch(()=>{});
+$("tables").addEventListener("click",async e=>{
+  const ed=e.target.dataset?.edit; if(ed){ openEd(VOTS.find(v=>v.id===ed)); return; }
+  const id=e.target.dataset?.id; if(!id) return;
+  if(armed!==id){ armed=id; e.target.textContent="Segur?"; setTimeout(()=>{if(armed===id){armed=null; e.target.textContent="Esborra"}},4000); return; }
+  armed=null;
+  await fetch("/api/vots?pin="+encodeURIComponent(PIN)+"&id="+encodeURIComponent(id),{method:"DELETE"});
+  load().catch(()=>{});
+});
+$("copy").onclick=async()=>{
+  try{ await navigator.clipboard.writeText($("sum").textContent); $("toast").textContent="Copiat."; }
+  catch(e){ const r=document.createRange(); r.selectNodeContents($("sum")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); $("toast").textContent="Text seleccionat: copia'l."; }
+  setTimeout(()=>$("toast").textContent="",3000);
+};
+if(PIN) enter();
+</script>
+</body>
+</html>
